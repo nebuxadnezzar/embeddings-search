@@ -13,7 +13,6 @@ import faiss
 import argparse
 import pickle
 import re
-import sqlite3
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from sentence_transformers import SentenceTransformer
@@ -38,13 +37,13 @@ wc_rx_a = re.compile('[*]', re.S)
 wc_rx_q = re.compile('[?]', re.S)
 wc_rx = re.compile('(?s).*[*?].*')
 
-DISTANCE = 10 #20
-MAT = 0.20    # maximum acceptable distance threashold
+DISTANCE = 20
+MAT = 0.35    # maximum acceptable distance threashold
 
 class HttpServerWrapper:
-    def __init__(self, prefixes, records, searcher, dbconn, port):
+    def __init__(self, prefixes, records, searcher, port):
         def handler(*args):
-            RequestHandler(prefixes, records, searcher, dbconn, *args)
+            RequestHandler(prefixes, records, searcher, *args)
         self._server = ThreadingHTTPServer(('', port), handler)
     def serve_forever(self):
         self._server.serve_forever()
@@ -54,11 +53,10 @@ class HttpServerWrapper:
 class RequestHandler(BaseHTTPRequestHandler):
     _startTime = datetime.now()
     
-    def __init__(self, prefixes, records, searcher, dbconn, *args):
+    def __init__(self, prefixes, records, searcher, *args):
         self._searcher = searcher
         self._prefixes = prefixes
         self._records = records
-        self._dbconn  = dbconn
         BaseHTTPRequestHandler.__init__(self, *args)
     
     def _getResponseTemplate(self):
@@ -93,16 +91,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(bytes(json.dumps(d), "utf-8"))
             return
             
-        results = runQuery(j, self._searcher, self._prefixes, self._dbconn)
+        results = runQuery(j, self._searcher, self._prefixes)
         lst = []
         [lst.append(self._records[i]) for i in results]
         if len(lst) and isinstance(lst[0], dict):
             lst = sorted(lst, key=lambda x: x['name'])
         d['count'] = len(lst)
-        d['data'] = lst
-        #for i in range(len(lst))
-        #    d['data'].append(lst[i]) 
-
+        [d['data'].append(lst[i]) for i in range(len(lst))]
+        #[print(f'{i+1} -> {lst[i]}') for i in range(len(lst))] 
+  
         self.wfile.write(bytes(json.dumps(d), "utf-8"))
         
 class FaissIndexWrapper:
@@ -160,7 +157,7 @@ def pfxsToDb(pfxs):
     dbname = ':memory:' #'pfxs.db'
     sql = 'create table if not exists pfx(id integer primary key autoincrement , prefix text);'
     sqlite3.threadsafety = 3
-    conn = sqlite3.connect(dbname, check_same_thread = False)
+    conn = sqlite3.connect(dbname)
     conn.execute(sql)
     # conn.execute('delete from pfx')
     for pfx in pfxs:
@@ -181,7 +178,7 @@ def wildCardToQueryObj(term, dbconn):
     return {"or":lst}, len(lst) > 0
    
 #==============================================================================        
-def runQuery(q, searcher, prefixes, dbconn):
+def runQuery(q, searcher, prefixes):
     
     # do query validation somewhere here
     # each query is map of list and each list may contain
@@ -195,20 +192,15 @@ def runQuery(q, searcher, prefixes, dbconn):
         for qq in q[k]:
             if isinstance(qq, str):
                 sys.stdout.write(f'{cnt}\n')
-
-                if not isWildCardPresent(qq):      
-                    D, I = searcher.search(qq)
-                    rec = filterRecordByDistance(D[0], I[0], prefixes)
-                    if isinstance(rec, list):
-                        op(set(rec))
-                else:
-                    obj, ok = wildCardToQueryObj(qq, dbconn)
-                    if ok:
-                        op(runQuery(obj, searcher, prefixes, dbconn))
-                
+                D, I = searcher.search(qq)
+                rec = filterRecordByDistance(D[0], I[0], prefixes)
+                # print(f'? count {len(I[0])} {qq} {D} {I} {set(rec)}')
+                # print(f'? count {len(I[0])} {qq} {D} {I}')
+                if isinstance(rec, list):
+                    op(set(rec))
                 cnt += 1
             elif isinstance(qq, dict):
-                op(runQuery(qq, searcher, prefixes, dbconn))
+                op(runQuery(qq, searcher, prefixes))
     # print(f'OP: {op.results}') 
     return op.results
 
@@ -217,12 +209,12 @@ def filterRecordByDistance(distances, offsets, prefixes):
     lst = []
     for idx in range(len(distances)):
        if distances[idx] <= MAT:
-           print(f'PFX: {prefixes[offsets[idx]][0]}\t{distances[idx]}')
+           print(f'PFX: {prefixes[offsets[idx]][0]}')
            lst.extend(prefixes[offsets[idx]][1])
     return lst
     
 #==============================================================================
-def searchIdx(prefixes, recs, searcher, dbconn):
+def searchIdx(prefixes, recs, searcher):
     print( "Enter your query below or 'q' to quit:")
     
     for line in sys.stdin:
@@ -238,7 +230,7 @@ def searchIdx(prefixes, recs, searcher, dbconn):
             print(f'invalid query or invalid json syntaxis')
             continue
 
-        results = runQuery(json.loads(q), searcher, prefixes, dbconn)
+        results = runQuery(json.loads(q), searcher, prefixes)
         lst = []
         [lst.append(recs[i]) for i in results]
         if len(lst) and isinstance(lst[0], dict):
@@ -247,7 +239,12 @@ def searchIdx(prefixes, recs, searcher, dbconn):
         
         [print(f'{i+1} -> {lst[i]}') for i in range(len(lst))]
         print( "Enter your query below or 'q' to quit: ")
-
+  
+#==============================================================================
+def fetchRecords(recs, recnums):
+      lst = []
+      for i in range(len(recnums)):
+          lst.append(recs[i])
 #==============================================================================
 def txtToJson(text):
     ok = True
@@ -292,33 +289,26 @@ def main(args):
     index = loadIdx(opts.idxFile, DISTANCE, opts.loadFaiss)
     recs = loadRecords(opts.recsFile)
     pfxs = loadRecords(opts.pfxFile)
-    dbconn = pfxsToDb(pfxs)
     # printRecs(recs, 20)
     searcher = SearchWrapper(index, SentenceTransformer('all-MiniLM-L6-v2'))
     # runQuery(json.loads(query), searcher, recs)
     
     print(f'OPTS: {opts} SEARCH: {opts.runSearch} SVR: {opts.webSearch} QUERY: {opts.query}')
-    try:
+    if opts.runSearch:
+        searchIdx(pfxs, recs, searcher)
+    elif opts.webSearch:
+        print(f'Starting server on port {opts.port}\n')
+        server = HttpServerWrapper(pfxs, recs, searcher, int(opts.port))
 
-        if opts.runSearch:
-            searchIdx(pfxs, recs, searcher, dbconn)
-        elif opts.webSearch:
-            print(f'Starting server on port {opts.port}\n')
-            server = HttpServerWrapper(pfxs, recs, searcher, dbconn, int(opts.port))
-
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                pass
-            print('Stopping server...\n')
-            server.server_close()
-        elif opts.query:
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
             pass
-        else:
-            print("query is empty!\nspecify at least one option: -server , -search or -query")
-    finally:
-        dbconn.close()
-        
+        print('Stopping server...\n')
+        server.server_close()
+    elif not opts.query:
+        print("query is empty!\nspecify at least one option: -server , -search or -query")
+    
     return 0
 
 #==============================================================================
@@ -335,11 +325,5 @@ if __name__ == '__main__':
 {"and": ["type:p", {"or": [{"and":["name:mustafa", {"or":["aliases:muhammed", "aliases:abu"]}]},"name:mostafa"]}]}
 {"or": [{"and":["name:mustafa", {"or":["aliases:muhammed", "aliases:abu"]}]},"name:mostafa"]}
 {"and": [{"or":["name:mustafa","name:mostafa"]}, {"or":["aliases:muhammed", "aliases:abu"]}]}
-{"and": [{"or":["name:m?sta*a"]}, {"or":["aliases:muhammed", "aliases:abu"]}]}
-{"and": [{"or":["name:m?sta*a"]}]}
-{"and": [{"or":["aliases:b*h*h*"]}]}
-{"and": [{"or":["aliases:b*h*h?"]}]}
-{"and": [{"or":["aliases:b*h*h?"]}, "type:p"]}
-{"and": ["type:v",{"or":["name:be*"]} ]}
-{"and": ["type:a",{"or":["name:*ark*"]} ]}
+{"and":["name:mustafa", "aliases:muhamm"]}
 '''

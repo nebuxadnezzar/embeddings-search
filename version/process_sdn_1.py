@@ -21,7 +21,6 @@ parser.add_argument( '-o', dest='outFile', help='output file', required=True, me
 
 ns_rx = re.compile(r'[{]([^{}]+)[}]')
 pu_rx = re.compile(r'[^\w\s]')
-stop_words_rx = re.compile(r'\s+(and|y|the|a|d|s|ll|re|ve|your|yours)\s+')
 #json_rx = re.compile(r'"[A-Z0-9]+"\s*:\s*"([^"]+)?"', re.I)
 
 locale.setlocale( locale.LC_ALL, '')
@@ -29,7 +28,7 @@ locale.setlocale( locale.LC_ALL, '')
 entity_types = {'Entity': 'O', 'Individual': 'P', 'Vessel': 'V', 'Aircraft': 'A'}
 id_map = {'idNumber':'id', 'idType':'type', 'idCountry':'country'}
 adr_lst = ['address1', 'city', 'postalCode', 'country']
-stop_words = ['and', 'y', 'the', 'a', 'd', 's', 'll', 're','ve',"your","yours"]
+
 #==============================================================================
 def parseXML(xmlfile):
     # create element tree object
@@ -143,8 +142,7 @@ def updateFreq(key, val, recId, freq):
     key = re.sub(ns_rx, '', key)
     val = re.sub('"', '',val).lower()
     
-    # vals = re.sub('\s+', ' ', re.sub(pu_rx, ' ', val)).strip().split()
-    vals = re.sub('\s+', ' ', re.sub(stop_words_rx, ' ', re.sub(pu_rx, ' ', val))).strip().split()
+    vals = re.sub('\s+', ' ', re.sub(pu_rx, ' ', val)).strip().split()
     #print(vals)
     for v in vals:
         k = f'{key}:{v}'

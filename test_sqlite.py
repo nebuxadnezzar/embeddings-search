@@ -32,12 +32,12 @@ def isWildCardPresent(term):
 def pfxsToDb(pfxs):
     dbname = ':memory:' #'pfxs.db'
     sql = 'create table if not exists pfx(id integer primary key autoincrement , prefix text);'
+    sqlite3.threadsafety = 3
     conn = sqlite3.connect(dbname)
     conn.execute(sql)
     # conn.execute('delete from pfx')
     for pfx in pfxs:
         sql = f"insert into pfx(prefix) values('{pfx[0]}')"
-        #print(sql)
         conn.execute(sql)
         
     conn.commit()
@@ -132,4 +132,15 @@ if __name__ == '__main__':
 
 '''
 select * from pfx where prefix like 'name:m_sta%a'
+
+
+(
+    sqlite3.connect(':memory:')
+    .execute("""
+        select * 
+        from pragma_COMPILE_OPTIONS 
+        where compile_options like 'THREADSAFE=%'
+    """)
+    .fetchall()
+)
 '''
