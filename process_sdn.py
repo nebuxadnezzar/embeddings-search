@@ -4,7 +4,7 @@ import sys
 import os
 import re
 import json
-#import fileinput
+import uuid
 import locale
 import argparse
 import xml.etree.ElementTree as ET
@@ -21,7 +21,8 @@ parser.add_argument( '-o', dest='outFile', help='output file', required=True, me
 
 ns_rx = re.compile(r'[{]([^{}]+)[}]')
 pu_rx = re.compile(r'[^\w\s]')
-stop_words_rx = re.compile(r'\s+(and|y|the|a|d|s|ll|re|ve|your|yours)\s+')
+#stop_words_rx = re.compile(r'\s+(and|y|the|a|d|s|ll|re|ve|your|yours)\s+')
+stop_words_rx = re.compile(r'\b(and|y|the|a|d|s|ll|re|ve|your|yours)\b')
 #json_rx = re.compile(r'"[A-Z0-9]+"\s*:\s*"([^"]+)?"', re.I)
 
 locale.setlocale( locale.LC_ALL, '')
@@ -29,7 +30,7 @@ locale.setlocale( locale.LC_ALL, '')
 entity_types = {'Entity': 'O', 'Individual': 'P', 'Vessel': 'V', 'Aircraft': 'A'}
 id_map = {'idNumber':'id', 'idType':'type', 'idCountry':'country'}
 adr_lst = ['address1', 'city', 'postalCode', 'country']
-stop_words = ['and', 'y', 'the', 'a', 'd', 's', 'll', 're','ve',"your","yours"]
+
 #==============================================================================
 def parseXML(xmlfile):
     # create element tree object
@@ -47,7 +48,7 @@ def parseXML(xmlfile):
     freq = {} # frequency map
 
     for item in root.findall("d:sdnEntry", ns):
-        e = {}
+        e = {'src':'ofac', '_id': str(uuid.uuid4())}
         akalist = [] # alias list
         occlist = [] # occupations list
         idlist = []  # identifications list

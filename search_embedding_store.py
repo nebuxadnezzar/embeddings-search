@@ -38,8 +38,10 @@ wc_rx_a = re.compile('[*]', re.S)
 wc_rx_q = re.compile('[?]', re.S)
 wc_rx = re.compile('(?s).*[*?].*')
 
-DISTANCE = 10 #20
+SET_OPERANDS = set(['and', 'or'])
+DISTANCE = 10 #20 probing distance
 MAT = 0.20    # maximum acceptable distance threashold
+WEL = 8      # wild card expansion limit
 
 class HttpServerWrapper:
     def __init__(self, prefixes, records, searcher, dbconn, port):
@@ -64,14 +66,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _getResponseTemplate(self):
         return {'data':[], 'message':'', 'count':'0', 'status':'ok'}
         
-    def _prepareResponse(self):
-        self.send_response(200)
+    def _prepareResponse(self, code):
+        self.send_response(code)
         self.send_header('Content-type', 'application/json; charset=utf-8')
         self.end_headers()
     
     def do_GET(self):
         print("GET request,\nPath: %s\nHeaders:\n%s\n", str(self.path), str(self.headers))
-        self._prepareResponse()
+        self._prepareResponse(200)
         d = self._getResponseTemplate()
         d['message'] = f'hearbeat, uptime: {datetime.now() - self._startTime}'
         self.wfile.write(bytes(json.dumps(d), "utf-8"))
@@ -80,7 +82,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         cl = int(self.headers['Content-Length'])
         pd = self.rfile.read(cl).decode('utf-8')
         print(f'CONTENT LENGTH: {cl}\nBODY: {pd}\nHEADERS: {str(self.headers)}')
-        self._prepareResponse()
         d = self._getResponseTemplate()
         d['message'] = 'search request'
         
@@ -89,20 +90,24 @@ class RequestHandler(BaseHTTPRequestHandler):
         except:
             d['status'] = 'failed'
             d['message'] = 'invalid query or invalid json syntaxis'
-            self.send_response(400)
+            self._prepareResponse(400)
             self.wfile.write(bytes(json.dumps(d), "utf-8"))
             return
             
         results = runQuery(j, self._searcher, self._prefixes, self._dbconn)
+        '''
         lst = []
-        [lst.append(self._records[i]) for i in results]
+        for i in results:
+            lst.append(self._records[i])
+        '''
+        lst = fetchRecords(j, results, self._records)
         if len(lst) and isinstance(lst[0], dict):
             lst = sorted(lst, key=lambda x: x['name'])
         d['count'] = len(lst)
         d['data'] = lst
         #for i in range(len(lst))
         #    d['data'].append(lst[i]) 
-
+        self._prepareResponse(200)
         self.wfile.write(bytes(json.dumps(d), "utf-8"))
         
 class FaissIndexWrapper:
@@ -153,6 +158,20 @@ class setOp:
         return self.__myset    
 
 #==============================================================================
+def fetchRecords(query_json, results, recs):
+    lst = []
+    filter_fields = query_json['filter_fields'] \
+                   if 'filter_fields' in query_json and \
+                   isinstance(query_json['filter_fields'], list) else []
+    for i in results:
+        rec1 = recs[i]
+        rec2 = {}
+        for f in filter_fields:
+            rec2[f] = rec1[f] if f in rec1 else f'unknown field{f}'
+        lst.append(rec2 if rec2 else rec1)
+        
+    return lst
+#==============================================================================
 def isWildCardPresent(term):
         return re.match(wc_rx, term)
 #==============================================================================
@@ -174,7 +193,8 @@ def wildCardToQueryObj(term, dbconn):
     t = re.sub(wc_rx_q, '_', re.sub(wc_rx_a, '%', term))
     print(t)
     
-    recs = dbconn.execute(f"select prefix from pfx where prefix like '{t}'")
+    recs = dbconn.execute(f""" select prefix from pfx where prefix like '{t}'\
+                               order by length(prefix) limit {WEL}""")
     lst = []
     for rec in recs:
         lst.append(rec[0])
@@ -190,6 +210,8 @@ def runQuery(q, searcher, prefixes, dbconn):
     # so below we expect to see only single key - "and" or "or"
     cnt = 1
     for k in q:
+        if k not in SET_OPERANDS:
+            continue
         op = setOp(k)
         print(f'{k} -> {q[k]} {op}')
         for qq in q[k]:
@@ -342,4 +364,5 @@ if __name__ == '__main__':
 {"and": [{"or":["aliases:b*h*h?"]}, "type:p"]}
 {"and": ["type:v",{"or":["name:be*"]} ]}
 {"and": ["type:a",{"or":["name:*ark*"]} ]}
+{"and": ["type:p",{"or":["name:mark?"]}],"filter_fields":["name", "addresses","aliases"]}
 '''
