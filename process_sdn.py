@@ -21,8 +21,8 @@ parser.add_argument( '-o', dest='outFile', help='output file', required=True, me
 
 ns_rx = re.compile(r'[{]([^{}]+)[}]')
 pu_rx = re.compile(r'[^\w\s]')
-#stop_words_rx = re.compile(r'\s+(and|y|the|a|d|s|ll|re|ve|your|yours)\s+')
-stop_words_rx = re.compile(r'\b(and|y|the|a|d|s|ll|re|ve|your|yours)\b')
+stop_words_rx = re.compile(r'\s+(and|y|the|a|d|s|ll|re|ve|your|yours)\s+')
+#stop_words_rx = re.compile(r'\b(and|y|the|a|d|s|ll|re|ve|your|yours)\b')
 #json_rx = re.compile(r'"[A-Z0-9]+"\s*:\s*"([^"]+)?"', re.I)
 
 locale.setlocale( locale.LC_ALL, '')
@@ -98,12 +98,12 @@ def parseXML(xmlfile):
             elif 'dateOfBirthList' in c.tag:
                 for d in c:
                     db = processDobItem(d)
-                    updateFreq('datesOfBirth', db, len(elist), freq)
+                    updateFreq('dob', db, len(elist), freq)
                     doblist.append(db)
             elif 'addressList' in c.tag:
                 for a in c:
                     addr = processAddrItem(a)
-                    updateFreqWithMap(addr, len(elist), freq, 'addresses')
+                    updateFreqWithMap(addr, len(elist), freq, 'addrs')
                     adrlist.append(addr)
             elif 'vesselInfo' in c.tag:
                 nat = processVesselInfo(c)
@@ -129,6 +129,10 @@ def parseXML(xmlfile):
         #if( record_count % 100 == 0 ):
         sys.stderr.write( "\rrecord count: " + str( len(elist) ) )
     sys.stderr.write( "\n")
+
+    # remove dups
+    for k in freq:
+        freq[k] = list(set(freq[k]))
     return elist, freq
 
 #============================================================================== 

@@ -40,8 +40,8 @@ wc_rx = re.compile('(?s).*[*?].*')
 
 SET_OPERANDS = set(['and', 'or'])
 DISTANCE = 10 #20 probing distance
-MAT = 0.20    # maximum acceptable distance threashold
-WEL = 8      # wild card expansion limit
+MAT = 0.089    # maximum acceptable distance threashold
+WEL = 20      # wild card expansion limit
 
 class HttpServerWrapper:
     def __init__(self, prefixes, records, searcher, dbconn, port):
@@ -101,8 +101,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             lst.append(self._records[i])
         '''
         lst = fetchRecords(j, results, self._records)
-        if len(lst) and isinstance(lst[0], dict):
-            lst = sorted(lst, key=lambda x: x['name'])
+        #if len(lst) and isinstance(lst[0], dict):
+        #    lst = sorted(lst, key=lambda x: x['name'])
         d['count'] = len(lst)
         d['data'] = lst
         #for i in range(len(lst))
@@ -193,7 +193,7 @@ def wildCardToQueryObj(term, dbconn):
     t = re.sub(wc_rx_q, '_', re.sub(wc_rx_a, '%', term))
     print(t)
     
-    recs = dbconn.execute(f""" select prefix from pfx where prefix like '{t}'\
+    recs = dbconn.execute(f""" select distinct prefix from pfx where prefix like '{t}'\
                                order by length(prefix) limit {WEL}""")
     lst = []
     for rec in recs:
@@ -365,4 +365,7 @@ if __name__ == '__main__':
 {"and": ["type:v",{"or":["name:be*"]} ]}
 {"and": ["type:a",{"or":["name:*ark*"]} ]}
 {"and": ["type:p",{"or":["name:mark?"]}],"filter_fields":["name", "addresses","aliases"]}
+{"and": ["type:p","name:mark?"],"filter_fields":["name", "addresses","aliases"]}
+{"and": ["type:v", "nationalities:iran" ], "filter_fields":["name","nationalities"]}
+{"and": [{"or":["datesOfBirth:1947"]}]}
 '''
