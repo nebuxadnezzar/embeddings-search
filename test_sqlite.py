@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 #  test_sqlite.py
-#  
+#
 
 import sys
 import re
@@ -21,10 +21,31 @@ parser.add_argument( '-searchdb', action='store_const', const=True, default=Fals
 parser.add_argument( '-wildcard', action='store_const', const=True, default=False, dest='runWildCard', help='run interactive wildcard conversion' )
 
 locale.setlocale( locale.LC_ALL, '')
-
+not_rx = re.compile('^!(.*)', re.S)
 wc_rx_a = re.compile('[*]', re.S)
 wc_rx_q = re.compile('[?]', re.S)
 wc_rx = re.compile('(?s).*[*?].*')
+
+WEL = 20      # wild card expansion limit
+NEL = 100     # not expansion limit
+
+#==============================================================================
+def isNotConditionPresent(term):
+    return re.match(not_rx, term)
+#==============================================================================
+def notToQueryObj(term, dbconn):
+    t = re.match(not_rx, re.sub(wc_rx_q, '_', re.sub(wc_rx_a, '%', term))).group(1)
+    ss = t.split(':')
+    prefix = f" like '{':'.join(ss[:len(ss) - 1])}%' and prefix " if len(ss) > 1 else ''
+    sql = f"""select prefix from pfx where prefix {prefix}
+              not like '{t}' order by prefix limit {NEL}"""
+    print(f'PREFIX: {prefix}\nSQL: {sql}')
+    recs = dbconn.execute(sql)
+    lst = []
+    for rec in recs:
+        lst.append(rec[0])
+    return {"or":lst}, len(lst) > 0
+#==============================================================================
 #==============================================================================
 def isWildCardPresent(term):
         return re.match(wc_rx, term)
@@ -39,20 +60,20 @@ def pfxsToDb(pfxs):
     for pfx in pfxs:
         sql = f"insert into pfx(prefix) values('{pfx[0]}')"
         conn.execute(sql)
-        
+
     conn.commit()
     return conn
 #==============================================================================
 def wildCardToQueryObj(term, dbconn):
     t = re.sub(wc_rx_q, '_', re.sub(wc_rx_a, '%', term))
     print(t)
-    
+
     recs = dbconn.execute(f"select prefix from pfx where prefix like '{t}'")
     lst = []
     for rec in recs:
         lst.append(rec[0])
     return {"or":lst}, len(lst) > 0
-   
+
 #==============================================================================
 #==============================================================================
 def searchDb(dbconn):
@@ -74,7 +95,7 @@ def searchDb(dbconn):
         for rec in recs:
             print(f"{rec[0]}\t{rec[1]}")
         print( "Enter your query below or 'q' to quit: ")
-  
+
 #==============================================================================
 def txtToJson(text):
     ok = True
@@ -82,10 +103,10 @@ def txtToJson(text):
     try:
         j = json.loads(text)
     except:
-        ok = False  
+        ok = False
     return j, ok
 
-#==============================================================================  
+#==============================================================================
 def loadRecords(path):
     recs = []
     for line in fileinput.input( path ):
@@ -97,8 +118,8 @@ def loadRecords(path):
             recs.append(l)
 
     return recs
-    
-#==============================================================================     
+
+#==============================================================================
 def printRecs(recs, limit):
     cnt = 1
     for rec in recs :
@@ -106,23 +127,29 @@ def printRecs(recs, limit):
         cnt += 1
         if cnt > limit:
             break
-#==============================================================================  
+#==============================================================================
 def main(args):
     print(args)
     opts = parser.parse_args()
     pfxs = loadRecords(opts.pfxFile)
     dbconn = pfxsToDb(pfxs)
     if opts.runSearch:
-       searchDb(dbconn) 
+       searchDb(dbconn)
     #printRecs(pfxs, 10)
-    
-    
-    for q in ["name:m?sta*a", "addresses:city:n*w y?rk", "name:joe"]:
-        if isWildCardPresent(q):
+
+
+    for q in ["name:m?sta*a", "addresses:city:n*w y?rk", "name:joe", "!addresses:city:l*nd?n"]:
+        if isNotConditionPresent(q):
+            print(f'{q} query has NOT',flush=True)
+            obj, ok = notToQueryObj(q, dbconn)
+            if ok:
+                print(obj)
+        elif isWildCardPresent(q):
             obj, ok = wildCardToQueryObj(q, dbconn)
             if ok:
                print(obj)
-            
+
+
     dbconn.close()
     return 0
 
@@ -137,8 +164,8 @@ select * from pfx where prefix like 'name:m_sta%a'
 (
     sqlite3.connect(':memory:')
     .execute("""
-        select * 
-        from pragma_COMPILE_OPTIONS 
+        select *
+        from pragma_COMPILE_OPTIONS
         where compile_options like 'THREADSAFE=%'
     """)
     .fetchall()
