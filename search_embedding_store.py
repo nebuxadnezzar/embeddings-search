@@ -41,9 +41,12 @@ wc_rx = re.compile('(?s).*[*?].*')
 
 SET_OPERANDS = set(['and', 'or'])
 DISTANCE = 10 #20 probing distance
-MAT = 0.089    # maximum acceptable distance threashold
+MAT = 0.089   # maximum acceptable distance threashold
 WEL = 20      # wild card expansion limit
 NEL = 200     # not expansion limit
+
+IDX_FILE = 'index.idx'
+IDX_INFO = 'index-info.json'
 
 class HttpServerWrapper:
     def __init__(self, prefixes, records, searcher, dbconn, port):
@@ -125,7 +128,8 @@ class HnswIndexWrapper:
         self.indexer = indexer
         self.distance = distance
         indexer.set_ef(50)
-        indexer.set_num_threads(4)
+        print(f'NUMBER OF THREADS {indexer.num_threads}\n', flush=True)
+        # indexer.set_num_threads(8)
 
     def search(self, xq):
         labels, distances = self.indexer.knn_query(xq, self.distance)
@@ -202,7 +206,7 @@ def wildCardToQueryObj(term, dbconn):
     t = re.sub(wc_rx_q, '_', re.sub(wc_rx_a, '%', term))
     #print(t)
 
-    recs = dbconn.execute(f""" select distinct prefix from pfx where prefix like '{t}'\
+    recs = dbconn.execute(f""" select prefix from pfx where prefix like '{t}'\
                                order by length(prefix) limit {WEL}""")
     lst = []
     for rec in recs:
@@ -251,6 +255,7 @@ def runQuery(q, searcher, prefixes, dbconn):
                         op(runQuery(obj, searcher, prefixes, dbconn))
                 else:
                     D, I = searcher.search(qq)
+                    print(f'D {D[0]}\nI {I[0]}\n')
                     rec = filterRecordByDistance(D[0], I[0], prefixes)
                     if isinstance(rec, list):
                         op(set(rec))
@@ -331,18 +336,27 @@ def loadRecords(path):
     return recs
 #==============================================================================
 def loadIdx(path, dist, isFaiss):
+    with open(os.path.join(path, IDX_INFO),"r") as f: opts = json.loads(f.read())
+    path = os.path.join(path, IDX_FILE)
+    print(f"OPTS: {opts}\nPATH: {path}")
     if isFaiss:
         index = FaissIndexWrapper(faiss.read_index(path, faiss.IO_FLAG_MMAP), dist)
     else:
-        index = HnswIndexWrapper(pickle.load(open(path, 'rb')), dist)
+        index = hnswlib.Index(space=opts['type'], dim=int(opts['dim']))
+        index.load_index(path)
+        index.num_threads = int(opts['threads'])
+        index = HnswIndexWrapper(index, dist)
     return index
 
 #==============================================================================
-def printRecs(recs, limit):
+def printRecs(recs, limit, pattern=None):
+
     cnt = 1
     for rec in recs :
-        print( rec )
-        cnt += 1
+        if pattern:
+            if re.match(pattern, str(rec)): print(rec); cnt += 1
+        else:
+            print( rec ); cnt += 1
         if cnt > limit:
             break
 #==============================================================================
@@ -352,7 +366,7 @@ def main(args):
     recs = loadRecords(opts.recsFile)
     pfxs = loadRecords(opts.pfxFile)
     dbconn = pfxsToDb(pfxs)
-    # printRecs(recs, 20)
+    # printRecs(pfxs, 440)
     searcher = SearchWrapper(index, SentenceTransformer('all-MiniLM-L6-v2'))
     # runQuery(json.loads(query), searcher, recs)
 

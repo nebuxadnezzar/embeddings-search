@@ -1,5 +1,5 @@
 #!/usr/bin/env python
- 
+
 import sys
 import os
 import numpy as np
@@ -9,7 +9,7 @@ import fileinput
 import locale
 import faiss
 import argparse
-import pickle
+# import pickle
 from datetime import datetime
 from sentence_transformers import SentenceTransformer
 
@@ -23,41 +23,49 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument( '-faiss', action='store_const', const=True, default=False, dest='createFaiss', help='create faiss index default: true' )
 parser.add_argument( '-s', action='store_const', const=True, default=False, dest='runSearch', help='run interactive search' )
-parser.add_argument( '-t', dest='idxType', type=str, default="l2", help='index type: l2, ivf, cosine, id', metavar="SYMBOL" )
+parser.add_argument( '-t', dest='idxType', type=str, default="l2", help='index type: l2, ivf, cosine, ip', metavar="SYMBOL" )
 parser.add_argument( '-i', dest='inFile', help='text file', required=True, metavar="FILE" )
-parser.add_argument( '-o', dest='outFile', help='output file', required=True, metavar="FILE" )
+parser.add_argument( '-o', dest='outDir', help='output file', required=True, metavar="FILE" )
 
 locale.setlocale( locale.LC_ALL, '')
 
 IVFTYPE = 'ivf'
 PQTYPE  = 'pq'
 NHSWTYPES = set(['l2', 'ip', 'cosine'])
+IDX_FILE = 'index.idx'
+IDX_INFO = 'index-info.json'
 
-def createNhswLibIndex(dim, recs, idxType):
+def createNhswLibIndex(dim, sentence_embeddings, idxType, idxDir):
     tp = 'l2'
     if idxType in NHSWTYPES:
         tp = idxType
-    sz = len(recs)
-    ids = np.arange(sz)  
+    sz = len(sentence_embeddings)
+    ids = np.arange(sz)
     index = hnswlib.Index(space=tp, dim=dim)  # possible options are l2, cosine or ip
 
     # Initializing index - the maximum number of elements should be known beforehand
     index.init_index(max_elements=sz, ef_construction=200, M=16)
-
+    index.set_num_threads(8)
+    print(f'DEFAULT NUMBER OF THREADS: {index.num_threads}')
     # Element insertion (can be called several times):
+    print(f'SENTENCE EMBEDDINGS: {len(sentence_embeddings)}')
     index.add_items(sentence_embeddings, ids)
 
     # Controlling the recall by setting ef:
     index.set_ef(50)  # ef should always be > k
-    
+
+    idxOpts = {'dim': dim, 'threads':8, 'idxLib':'hnswlib', 'type': tp}
+    os.makedirs(name=idxDir, mode=0x1ED, exist_ok=True)
+    index.save_index(os.path.join(idxDir,IDX_FILE))
+    f = open(os.path.join(idxDir,IDX_INFO), 'w'); f.write(json.dumps(idxOpts)); f.close()
     return index
 
 #==============================================================================
-def createFaissIndex(dim, idxType ):
+def createFaissIndex(dim, sentence_embeddings, idxType, idxDir ):
     print(f'\nCREATING FAISS index')
     nlist = dim // 300
     if nlist < 5:
-        nlist = 5 
+        nlist = 5
     quantizer = faiss.IndexFlatL2(dim)
     print(f'\t INDEX TYPE: {idxType}\n')
     if IVFTYPE in idxType:
@@ -65,11 +73,22 @@ def createFaissIndex(dim, idxType ):
     elif PQTYPE in idxType:
         m = 8  # number of centroid IDs in final compressed vectors
         bits = 8 # number of bits in each centroid
-        index = faiss.IndexIVFPQ(quantizer, dim, nlist, m, bits) 
+        index = faiss.IndexIVFPQ(quantizer, dim, nlist, m, bits)
     else:
         index = quantizer
-        
+
     index.nprobe = 20
+
+    if not index.is_trained:
+        print("Training FAISS...")
+        index.train(sentence_embeddings)
+    index.add(sentence_embeddings)
+    print(f'index total: {index.ntotal}')
+
+    idxOpts = {'dim': dim,  'idxLib':'faiss', 'type': idxType}
+    os.makedirs(name=idxDir, mode=0o755, exist_ok=True)
+    faiss.write_index(index, os.path.join(idxDir, IDX_FILE))
+    f = open(os.path.join(idxDir,IDX_INFO), 'w'); f.write(json.dumps(idxOpts)); f.close()
     return index
 
 #==============================================================================
@@ -84,9 +103,9 @@ def txtToJson(text):
     try:
         j = json.loads(text)
     except:
-        ok = False  
+        ok = False
     return j, ok
-#==============================================================================  
+#==============================================================================
 def loadRecords(path):
     recs = []
     for line in fileinput.input( path ):
@@ -105,76 +124,68 @@ def loadFile(path):
         recs.append(line.strip('\n'))
 
     return recs
-        
+
 #==============================================================================
 def searchIdx(recs, model, index, isFaiss):
     print( "Enter your query below:")
-    
+
     for line in sys.stdin:
         if 'q' == line.rstrip():
             break
         if not line:
             continue
 
-        print(f'Running {line.strip()} ...')
-        
+        print(f'''Running '{line.strip()}' ...''')
+
         k = 4 # distance
         xq = model.encode([line]) # query
 
         if isFaiss:
             D, I = index.search(xq, k)
-            
+
         else:
             D, I = searchWithHnsw(index, xq, k)
-        
+
         print(f'{D}\n{I}')
-        [print(f'{i}: {recs[i]}') for i in I[0]]   
+        [print(f'{i}: {recs[i]}') for i in I[0]]
         print( "Enter your query below: ")
-  
+
 #==============================================================================
 def searchWithHnsw(index, query, dist):
     labels, distances = index.knn_query(query, dist)
-    return distances, labels   
+    return distances, labels
 #==============================================================================
 
 if __name__ == "__main__":
     opts = parser.parse_args()
-    
+
     recs = loadRecords(opts.inFile)
     cnt = 1
     for rec in recs :
         print( rec )
         cnt += 1
-        if cnt > 1000:
+        if cnt > 440:
             break
 
     print("CREATING EMBEDDINGS...\n")
     t1 = datetime.now()
     model = SentenceTransformer('all-MiniLM-L6-v2')
     sentence_embeddings = model.encode(recs, normalize_embeddings=True) #.tolist()
-    
+
     shape = sentence_embeddings.shape
     print(sentence_embeddings.shape)
-    
+
     if opts.createFaiss :
-        index =  createFaissIndex(shape[1], opts.idxType)
-        if not index.is_trained:
-            print("Training FAISS...")
-            index.train(sentence_embeddings)
-        index.add(sentence_embeddings)
-        print(f'index total: {index.ntotal}')
-        faiss.write_index(index, opts.outFile)
-    
+        index =  createFaissIndex(shape[1], sentence_embeddings, opts.idxType, opts.outDir)
     else:
         print('CREATE HNSWLIB')
-        index = createNhswLibIndex(shape[1], recs, opts.idxType )
-        pickle.dump( index, open( opts.outFile, 'wb') )
-    
+        index = createNhswLibIndex(shape[1], sentence_embeddings, opts.idxType, opts.outDir )
+
     print(f'TIME TO CREATE INDEX: {datetime.now() - t1}')
-    
+
     if opts.runSearch:
         searchIdx(recs, model, index, opts.createFaiss)
-    
+
     # bee is sitting on yellow flower
     # byciclist sitting on a bike
     # aliases:Ruhollah BAZGHANDI
