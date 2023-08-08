@@ -85,7 +85,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         cl = int(self.headers['Content-Length'])
-        pd = self.rfile.read(cl).decode('utf-8')
+        pd = self.rfile.read(cl).decode('utf-8') # read request body
         print(f'CONTENT LENGTH: {cl}\nBODY: {pd}\nHEADERS: {str(self.headers)}')
         d = self._getResponseTemplate()
         d['message'] = 'search request'
@@ -100,11 +100,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         results = runQuery(j, self._searcher, self._prefixes, self._dbconn)
-        '''
-        lst = []
-        for i in results:
-            lst.append(self._records[i])
-        '''
+
         lst = fetchRecords(j, results, self._records)
         #if len(lst) and isinstance(lst[0], dict):
         #    lst = sorted(lst, key=lambda x: x['name'])
@@ -255,7 +251,7 @@ def runQuery(q, searcher, prefixes, dbconn):
                         op(runQuery(obj, searcher, prefixes, dbconn))
                 else:
                     D, I = searcher.search(qq)
-                    print(f'D {D[0]}\nI {I[0]}\n')
+                    # print(f'D {D[0]}\nI {I[0]}\n')
                     rec = filterRecordByDistance(D[0], I[0], prefixes)
                     if isinstance(rec, list):
                         op(set(rec))
@@ -418,5 +414,5 @@ if __name__ == '__main__':
 {"and": ["type:p",{"or":["name:mark?"]}],"filter_fields":["name", "addresses","aliases"]}
 {"and": ["type:p","name:mark?"],"filter_fields":["name", "addresses","aliases"]}
 {"and": ["type:v", "nationalities:iran" ], "filter_fields":["name","nationalities"]}
-{"and": [{"or":["datesOfBirth:1947"]}]}
+{"and": ["type:p", "name:f*w*", {"or":["dob:194?"]}], "filter_fields":["type", "name", "datesOfBirth"]}
 '''

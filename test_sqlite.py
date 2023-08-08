@@ -39,7 +39,7 @@ def notToQueryObj(term, dbconn):
     prefix = f" like '{':'.join(ss[:len(ss) - 1])}%' and prefix " if len(ss) > 1 else ''
     sql = f"""select prefix from pfx where prefix {prefix}
               not like '{t}' order by prefix limit {NEL}"""
-    print(f'PREFIX: {prefix}\nSQL: {sql}')
+    # print(f'PREFIX: {prefix}\nSQL: {sql}')
     recs = dbconn.execute(sql)
     lst = []
     for rec in recs:
