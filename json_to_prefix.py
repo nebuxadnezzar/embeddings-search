@@ -59,8 +59,8 @@ def jsonToPfxLst(pfx, pfxmap, id, lst):
             jsonToPfxLst(f'{pfx}:', pfxmap, id, i)
         else:
             for val in tokenize(i):
-                key = f'{pfx}{val}'.lower()
-                # pfxmap['_keys_'].add(pfx)
+                key = f'{pfx}{val.lower()}'
+                # print(f'LST KEY: {key}')
                 updatePfxMap(pfxmap, key, id)
 
 #==============================================================================
@@ -72,12 +72,12 @@ def jsonToPfx(pfx, pfxmap, id, doc):
         if isinstance(doc[k], dict):
             jsonToPfx(f'{pfx}{k}:', pfxmap, id, doc[k])
         elif isinstance(doc[k], list):
-            pfxmap['_keys_'].add(f'{pfx}{k}'.lower())
+            pfxmap['_keys_'].add(f'{pfx}{k}')
             jsonToPfxLst(f'{pfx}{k}:', pfxmap, id, doc[k])
         else:
             for val in tokenize(doc[k]):
-                key = f'{pfx}{k}:{val}'.lower()
-                pfxmap['_keys_'].add(f'{pfx}{k}'.lower())
+                key = f'{pfx}{k}:{val.lower()}'
+                pfxmap['_keys_'].add(f'{pfx}{k}')
                 updatePfxMap(pfxmap, key, id)
 
 #==============================================================================

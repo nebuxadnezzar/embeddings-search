@@ -4,6 +4,7 @@
 #  search_prefix_db.py
 #
 import re
+import os
 import sys
 import json
 import fileinput
@@ -21,12 +22,14 @@ parser.add_argument( '-records', dest='recsFile', help='records file', required=
 parser.add_argument( '-prefixes', dest='pfxFile', help='prefixes file', required=True, metavar="FILE" )
 parser.add_argument( '-port', dest='port', type=str, default="5555", help='server port', metavar="SYMBOL" )
 parser.add_argument( '-server', action='store_const', const=True, default=False, dest='webSearch', help='run web search server' )
+parser.add_argument( '-dumpdb', action='store_const', const=True, default=False, dest='dumpDb', help='dump prefixes to db' )
 
 locale.setlocale( locale.LC_ALL, '')
 wc_rx_a = re.compile('[*]', re.S)
 wc_rx_q = re.compile('[?]', re.S)
 wc_rx = re.compile('(?s).*[*?].*')
 
+PFXDB = 'pfxs.db'
 SET_OPERANDS = set(['and', 'or'])
 WEL = 20      # wild card expansion limit
 
@@ -65,7 +68,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path == '/keys':
             print(f'KEYS: {self._prefixes[0]}\n')
             d['count'] = 1
-            d['data'] = self._prefixes[0]
+            d['data'] = sorted(self._prefixes[0][1])
             d['message'] = 'keys request'
         self.wfile.write(bytes(json.dumps(d), "utf-8"))
 
@@ -136,8 +139,17 @@ def fetchRecords(query_json, results, recs):
 def isWildCardPresent(term):
         return re.match(wc_rx, term)
 #==============================================================================
-def pfxsToDb(pfxs):
-    dbname = ':memory:' # 'pfxs.db'
+def removeDb():
+    try:
+        if os.path.exists(PFXDB) and os.path.isfile(PFXDB):
+            os.remove(PFXDB)
+    except Exception as e:
+        print(f"FAILED TO REMOVE: {PFXDB}")
+    return not os.path.exists(PFXDB)
+
+#==============================================================================
+def pfxsToDb(pfxs, dbname):
+    # dbname = ':memory:' # 'pfxs.db'
     sql = 'create table if not exists pfx(id integer primary key autoincrement, prefix text);'
     sqlite3.threadsafety = 3
     conn = sqlite3.connect(dbname, check_same_thread = False)
@@ -186,7 +198,7 @@ def runQuery(q, wel, prefixes, dbconn):
                 recs, ok = prefixSearch(qq, wel, dbconn)
                 for rec in recs:
                     lst.extend(prefixes[rec][1])
-                    print(f'---> {rec}')
+                    # print(f'---> {rec}')
                 op(set(lst))
 
                 cnt += 1
@@ -249,7 +261,7 @@ def main(args):
     pfxs = loadRecords(opts.pfxFile)
 
     try:
-        dbconn = pfxsToDb(pfxs)
+        dbconn = pfxsToDb(pfxs, PFXDB if opts.dumpDb and removeDb() else ':memory:')
         if opts.webSearch:
             print(f'Starting server on port {opts.port}\n')
             server = HttpServerWrapper(pfxs, recs, dbconn, int(opts.port))
